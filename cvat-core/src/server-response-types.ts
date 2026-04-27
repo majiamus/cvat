@@ -154,24 +154,51 @@ export interface SerializedJob {
     consensus_replicas: number;
 }
 
+/**
+ * 属性输入类型定义
+ * 定义了属性在UI中的输入方式
+ */
 export type AttrInputType = 'select' | 'radio' | 'checkbox' | 'number' | 'text';
+
+/**
+ * 序列化属性接口
+ * 用于表示任务属性的配置信息，包括名称、可变性、输入类型等
+ */
 export interface SerializedAttribute {
+    /** 属性名称 */
     name: string;
+    /** 属性是否可修改 */
     mutable: boolean;
+    /** 属性输入类型，决定UI中的输入方式 */
     input_type: AttrInputType;
+    /** 属性的默认值 */
     default_value: string;
+    /** 可选值列表（用于select、radio、checkbox类型） */
     values: string[];
+    /** 属性ID（可选） */
     id?: number;
 }
 
+/**
+ * 序列化标签接口
+ * 用于表示任务标签的配置信息，包含标签的基本属性、样式、类型和关联属性
+ */
 export interface SerializedLabel {
+    /** 标签ID（可选） */
     id?: number;
+    /** 标签名称 */
     name: string;
+    /** 标签颜色（可选，用于可视化显示） */
     color?: string;
+    /** 标签类型 */
     type: LabelType;
+    /** SVG图标内容（可选，用于标签图标显示） */
     svg?: string;
+    /** 子标签列表（可选，用于层级标签结构） */
     sublabels?: SerializedLabel[];
+    /** 是否有父标签（可选，表示是否为子标签） */
     has_parent?: boolean;
+    /** 标签关联的属性列表 */
     attributes: SerializedAttribute[];
 }
 

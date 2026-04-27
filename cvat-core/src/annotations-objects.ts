@@ -1522,82 +1522,147 @@ export class Tag extends Annotation {
     }
 }
 
+/**
+ * 矩形形状类，继承自Shape
+ * 用于表示和处理矩形标注对象，支持旋转
+ */
 export class RectangleShape extends Shape {
+    /**
+     * 创建矩形形状实例
+     * @param data - 序列化的形状数据
+     * @param clientID - 客户端ID
+     * @param color - 形状颜色
+     * @param injection - 注解注入对象
+     */
     constructor(data: SerializedShape, clientID: number, color: string, injection: AnnotationInjection) {
         super(data, clientID, color, injection);
         this.shapeType = ShapeType.RECTANGLE;
-        this.pinned = false;
+        this.pinned = false; // 矩形默认不固定
         checkNumberOfPoints(this.shapeType, this.points);
     }
 
+    /**
+     * 计算点到旋转矩形的距离
+     * 先将点坐标转换到矩形的旋转坐标系，然后计算最短距离
+     * @param points - 矩形的顶点坐标数组，格式为[xtl,ytl,xbr,ybr]，表示左上角和右下角
+     * @param x - 目标点的x坐标
+     * @param y - 目标点的y坐标
+     * @param angle - 矩形的旋转角度（弧度）
+     * @returns 如果点在矩形内部返回到最近边的距离，否则返回null
+     */
     static distance(points: number[], x: number, y: number, angle: number): number {
+        // 解构矩形坐标：左上角(xtl,ytl)和右下角(xbr,ybr)
         const [xtl, ytl, xbr, ybr] = points;
+        
+        // 计算矩形中心点坐标
         const cx = xtl + (xbr - xtl) / 2;
         const cy = ytl + (ybr - ytl) / 2;
+        
+        // 将目标点坐标转换到矩形的旋转坐标系（反向旋转-angle角度）
         const [rotX, rotY] = rotatePoint(x, y, -angle, cx, cy);
 
+        // 检查旋转后的点是否在矩形边界内
         if (!(rotX >= xtl && rotX <= xbr && rotY >= ytl && rotY <= ybr)) {
-            // Cursor is outside of a box
+            // 点在矩形外部，返回null
             return null;
         }
 
-        // The shortest distance from point to an edge
+        // 计算点到四条边的最短距离
+        // 距离数组分别表示：到左边、顶边、右边、底边的距离
         return Math.min.apply(null, [rotX - xtl, rotY - ytl, xbr - rotX, ybr - rotY]);
     }
 }
 
+/**
+ * 椭圆形状类，继承自Shape
+ * 用于表示和处理椭圆标注对象，支持旋转
+ */
 export class EllipseShape extends Shape {
+    /**
+     * 创建椭圆形状实例
+     * @param data - 序列化的形状数据
+     * @param clientID - 客户端ID
+     * @param color - 形状颜色
+     * @param injection - 注解注入对象
+     */
     constructor(data: SerializedShape, clientID: number, color: string, injection: AnnotationInjection) {
         super(data, clientID, color, injection);
         this.shapeType = ShapeType.ELLIPSE;
-        this.pinned = false;
+        this.pinned = false; // 椭圆默认不固定
         checkNumberOfPoints(this.shapeType, this.points);
     }
 
+    /**
+     * 计算点到旋转椭圆的距离
+     * 先将点坐标转换到椭圆的旋转坐标系，判断点是否在椭圆内，然后计算到边界的距离
+     * @param points - 椭圆的参数数组，格式为[cx,cy,rightX,topY]，表示中心点、右边界和上边界
+     * @param x - 目标点的x坐标
+     * @param y - 目标点的y坐标
+     * @param angle - 椭圆的旋转角度（弧度）
+     * @returns 如果点在椭圆内部返回到边界的距离，否则返回null
+     */
     static distance(points: number[], x: number, y: number, angle: number): number {
+        // 解构椭圆参数：中心点(cx,cy)、右边界(rightX)、上边界(topY)
         const [cx, cy, rightX, topY] = points;
+        
+        // 计算椭圆的长半轴(rx)和短半轴(ry)
         const [rx, ry] = [rightX - cx, cy - topY];
+        
+        // 将目标点坐标转换到椭圆的旋转坐标系（反向旋转-angle角度）
         const [rotX, rotY] = rotatePoint(x, y, -angle, cx, cy);
-        // https://math.stackexchange.com/questions/76457/check-if-a-point-is-within-an-ellipse
+        
+        /**
+         * 判断点是否在椭圆内部的函数
+         * 椭圆方程：((x-cx)²/rx²) + ((y-cy)²/ry²) <= 1
+         * https://math.stackexchange.com/questions/76457/check-if-a-point-is-within-an-ellipse
+         */
         const pointWithinEllipse = (_x: number, _y: number): boolean => (
             ((_x - cx) ** 2) / rx ** 2) + (((_y - cy) ** 2) / ry ** 2
         ) <= 1;
 
+        // 检查旋转后的点是否在椭圆内部
         if (!pointWithinEllipse(rotX, rotY)) {
-            // Cursor is outside of an ellipse
+            // 点在椭圆外部，返回null
             return null;
         }
 
+        // 特殊情况：如果目标点非常接近椭圆中心，直接返回最小半轴长度
         if (Math.abs(x - cx) < Number.EPSILON && Math.abs(y - cy) < Number.EPSILON) {
-            // cursor is near to the center, just return minimum of height, width
+            // 光标接近中心，返回高度和宽度的最小值
             return Math.min(rx, ry);
         }
 
-        // ellipse equation is x^2/rx^2 + y^2/ry^2 = 1
-        // from this equation:
-        // x^2 = ((rx * ry)^2 - (y * rx)^2) / ry^2
-        // y^2 = ((rx * ry)^2 - (x * ry)^2) / rx^2
+        // 椭圆方程：x²/rx² + y²/ry² = 1
+        // 根据椭圆方程推导：
+        // x² = ((rx * ry)² - (y * rx)²) / ry²
+        // y² = ((rx * ry)² - (x * ry)²) / rx²
 
-        // we have one point inside the ellipse, let's build two lines (horizontal and vertical) through the point
-        // and find their interception with ellipse
+        // 构建通过目标点的水平线和垂直线，计算它们与椭圆的交点
+        // 水平线方程：y = rotY，求交点的x坐标
         const x2Equation = (_y: number): number => (((rx * ry) ** 2) - ((_y * rx) ** 2)) / (ry ** 2);
+        // 垂直线方程：x = rotX，求交点的y坐标
         const y2Equation = (_x: number): number => (((rx * ry) ** 2) - ((_x * ry) ** 2)) / (rx ** 2);
 
-        // shift x,y to the ellipse coordinate system to compute equation correctly
-        // y axis is inverted
+        // 将目标点坐标转换到椭圆坐标系（以中心为原点）
+        // Y轴需要反转（因为图像坐标系Y轴向下）
         const [shiftedX, shiftedY] = [x - cx, cy - y];
+        
+        // 计算水平线与椭圆的交点坐标
         const [x1, x2] = [Math.sqrt(x2Equation(shiftedY)), -Math.sqrt(x2Equation(shiftedY))];
+        // 计算垂直线与椭圆的交点坐标
         const [y1, y2] = [Math.sqrt(y2Equation(shiftedX)), -Math.sqrt(y2Equation(shiftedX))];
 
-        // found two points on ellipse edge
-        const ellipseP1X = shiftedX >= 0 ? x1 : x2; // ellipseP1Y is shiftedY
-        const ellipseP2Y = shiftedY >= 0 ? y1 : y2; // ellipseP1X is shiftedX
+        // 根据目标点位置选择合适的交点
+        // 选择x方向上与目标点同侧的交点
+        const ellipseP1X = shiftedX >= 0 ? x1 : x2; // 水平线交点的x坐标
+        // 选择y方向上与目标点同侧的交点
+        const ellipseP2Y = shiftedY >= 0 ? y1 : y2; // 垂直线交点的y坐标
 
-        // found diffs between two points on edges and target point
-        const diff1X = ellipseP1X - shiftedX;
-        const diff2Y = ellipseP2Y - shiftedY;
+        // 计算目标点到两个边界点的距离差
+        const diff1X = ellipseP1X - shiftedX; // x方向距离
+        const diff2Y = ellipseP2Y - shiftedY; // y方向距离
 
-        // return minimum, get absolute value because we need distance, not diff
+        // 返回最小距离（取绝对值，因为我们只需要距离值）
         return Math.min(Math.abs(diff1X), Math.abs(diff2Y));
     }
 }
@@ -1614,73 +1679,99 @@ class PolyShape extends Shape {
     }
 }
 
+/**
+ * 多边形形状类，继承自PolyShape
+ * 用于表示和处理多边形标注对象
+ */
 export class PolygonShape extends PolyShape {
+    /**
+     * 创建多边形形状实例
+     * @param data - 序列化的形状数据
+     * @param clientID - 客户端ID
+     * @param color - 形状颜色
+     * @param injection - 注解注入对象
+     */
     constructor(data: SerializedShape, clientID: number, color: string, injection: AnnotationInjection) {
         super(data, clientID, color, injection);
         this.shapeType = ShapeType.POLYGON;
         checkNumberOfPoints(this.shapeType, this.points);
     }
 
+    /**
+     * 计算点到多边形的距离
+     * 使用绕数算法判断点是否在多边形内部，并计算最短距离
+     * @param points - 多边形的顶点坐标数组，格式为[x1,y1,x2,y2,...]
+     * @param x - 目标点的x坐标
+     * @param y - 目标点的y坐标
+     * @returns 如果点在多边形内部返回最短距离，否则返回null
+     */
     static distance(points: number[], x: number, y: number): number {
+        /**
+         * 计算向量叉积，用于判断点的相对位置
+         * @returns 叉积值，>0表示点在向量左侧，<0表示右侧，=0表示共线
+         */
         function position(x1, y1, x2, y2): number {
             return (x2 - x1) * (y - y1) - (x - x1) * (y2 - y1);
         }
 
-        let wn = 0;
-        const distances = [];
+        let wn = 0; // 绕数，用于判断点是否在多边形内部
+        const distances = []; // 存储点到各边的距离
 
+        // 遍历多边形的每条边
         for (let i = 0, j = points.length - 2; i < points.length - 1; j = i, i += 2) {
-            // Current point
+            // Current point - 当前边的起点
             const x1 = points[j];
             const y1 = points[j + 1];
 
-            // Next point
+            // Next point - 当前边的终点
             const x2 = points[i];
             const y2 = points[i + 1];
 
-            // Check if a point is inside a polygon
-            // with a winding numbers algorithm
+            // 使用绕数算法判断点是否在多边形内部
             // https://en.wikipedia.org/wiki/Point_in_polygon#Winding_number_algorithm
             if (y1 <= y) {
                 if (y2 > y) {
                     if (position(x1, y1, x2, y2) > 0) {
-                        wn++;
+                        wn++; // 向上穿过边，绕数+1
                     }
                 }
             } else if (y2 <= y) {
                 if (position(x1, y1, x2, y2) < 0) {
-                    wn--;
+                    wn--; // 向下穿过边，绕数-1
                 }
             }
 
-            // Find the shortest distance from point to an edge
-            // Get an equation of a line in general
-            const aCoef = y1 - y2;
-            const bCoef = x2 - x1;
+            // 计算点到当前边的最短距离
+            // 获取直线方程的一般式系数: ax + by + c = 0
+            const aCoef = y1 - y2; // a = y1 - y2
+            const bCoef = x2 - x1; // b = x2 - x1
 
-            // Vector (aCoef, bCoef) is a perpendicular to line
-            // Now find the point where two lines
-            // (edge and its perpendicular through the point (x,y)) are cross
+            // (aCoef, bCoef)是边的法向量
+            // 计算通过点(x,y)的法线与边的交点
             const xCross = x - aCoef;
             const yCross = y - bCoef;
 
+            // 判断交点是否在线段上
             if ((xCross - x1) * (x2 - xCross) >= 0 && (yCross - y1) * (y2 - yCross) >= 0) {
-                // Cross point is on segment between p1(x1,y1) and p2(x2,y2)
+                // 交点在线段内，计算点到交点的垂直距离
                 distances.push(Math.sqrt((x - xCross) ** 2 + (y - yCross) ** 2));
             } else {
+                // 交点不在线段内，取点到两个端点的最小距离
                 distances.push(
                     Math.min(
-                        Math.sqrt((x1 - x) ** 2 + (y1 - y) ** 2),
-                        Math.sqrt((x2 - x) ** 2 + (y2 - y) ** 2),
+                        Math.sqrt((x1 - x) ** 2 + (y1 - y) ** 2), // 到起点的距离
+                        Math.sqrt((x2 - x) ** 2 + (y2 - y) ** 2), // 到终点的距离
                     ),
                 );
             }
         }
 
+        // 如果绕数不为0，说明点在多边形内部，返回最短距离
         if (wn !== 0) {
             return Math.min.apply(null, distances);
         }
 
+        // 点在多边形外部，返回null
         return null;
     }
 }
@@ -2205,28 +2296,68 @@ export class SkeletonShape extends Shape {
     }
 }
 
+/**
+ * 掩码形状类 - 处理基于RLE编码的掩码标注
+ * 
+ * 主要特点：
+ * - 继承自Shape基类，专门处理掩码类型的标注
+ * - 使用RLE(Run-Length Encoding)编码存储掩码数据
+ * - 支持掩码重叠区域的像素移除功能
+ * - 提供高效的掩码距离计算算法
+ * 
+ * 使用场景：
+ * - 语义分割和实例分割标注
+ * - 医学图像掩码标注
+ * - 需要精确像素级控制的场景
+ */
 export class MaskShape extends Shape {
-    public left: number;
-    public top: number;
-    public right: number;
-    public bottom: number;
-    private getMasksOnFrame: AnnotationInjection['getMasksOnFrame'];
+    public left: number;    // 掩码边界框左坐标
+    public top: number;     // 掩码边界框上坐标
+    public right: number;   // 掩码边界框右坐标
+    public bottom: number;  // 掩码边界框下坐标
+    private getMasksOnFrame: AnnotationInjection['getMasksOnFrame']; // 获取当前帧所有掩码的函数
 
+    /**
+     * MaskShape构造函数
+     * @param data - 序列化的形状数据，包含RLE编码的点数据
+     * @param clientID - 客户端唯一标识符
+     * @param color - 形状显示颜色
+     * @param injection - 依赖注入对象，提供必要的功能函数
+     */
     constructor(data: SerializedShape, clientID: number, color: string, injection: AnnotationInjection) {
         super(data, clientID, color, injection);
+        
+        // 从RLE数据末尾提取边界框坐标 [left, top, right, bottom]
         const [left, top, right, bottom] = this.points.slice(-4);
         const { width, height } = this.framesInfo[this.frame];
+        
+        // 如果边界框超出图像范围，裁剪掩码数据
         if (left >= width || top >= height || right >= width || bottom >= height) {
             this.points = cropMask(this.points, width, height);
         }
+        
+        // 移除边界框坐标，分离存储到专用属性
         [this.left, this.top, this.right, this.bottom] = this.points.splice(-4, 4);
+        
+        // 注入依赖函数，用于获取当前帧的其他掩码
         this.getMasksOnFrame = injection.getMasksOnFrame;
+        
+        // 掩码形状默认固定，不支持直接移动
         this.pinned = true;
         this.shapeType = ShapeType.MASK;
     }
 
+/**
+     * 在保存前验证状态数据
+     * @param data - 要验证的状态对象
+     * @param updated - 更新的标志位
+     * @param frame - 帧号
+     * @returns 需要裁剪的点数据数组
+     */
     protected validateStateBeforeSave(data: ObjectState, updated: ObjectState['updateFlags'], frame?: number): number[] {
         super.validateStateBeforeSave(data, updated, frame);
+        
+        // 如果点数据被更新，需要裁剪到图像边界内
         if (updated.points) {
             const { width, height } = this.framesInfo[frame];
             return cropMask(data.points, width, height);
@@ -2235,6 +2366,18 @@ export class MaskShape extends Shape {
         return [];
     }
 
+/**
+     * 移除底层像素 - 处理掩码重叠区域的像素冲突
+     * 
+     * 算法原理：
+     * 1. 遍历当前掩码的所有像素
+     * 2. 对于每个像素，检查是否与其他掩码重叠
+     * 3. 如果重叠，在其他掩码的对应位置清除该像素
+     * 4. 生成可撤销/重做的操作记录
+     * 
+     * @param frame - 当前帧号
+     * @returns 包含受影响对象ID、撤销/重做函数和空掩码标志的对象
+     */
     public removeUnderlyingPixels(frame: number):
     {
         clientIDs: number[],
@@ -2242,24 +2385,35 @@ export class MaskShape extends Shape {
         redo: Function,
         emptyMaskOccurred: boolean,
     } {
+        // 验证帧号一致性
         if (frame !== this.frame) {
             throw new ArgumentError(
                 `Wrong "frame" attribute: is not equal to the shape frame (${frame} vs ${this.frame})`,
             );
         }
 
+        // 获取当前帧的其他非移除掩码
         const others = this.getMasksOnFrame(frame)
             .filter((mask: MaskShape) => mask.clientID !== this.clientID && !mask.removed);
+        
+        // 计算当前掩码的宽高
         const width = this.right - this.left + 1;
         const height = this.bottom - this.top + 1;
         const updatedObjects: Record<number, MaskShape> = {};
 
         let masks = {};
+        
+        // 将RLE编码转换为二维掩码数组以便处理
         const currentMask = rle2Mask(this.points, width, height);
+        
+        // 遍历当前掩码的所有像素
         for (let i = 0; i < currentMask.length; i++) {
             if (currentMask[i]) {
+                // 计算像素在图像坐标系中的位置
                 const imageX = (i % width) + this.left;
                 const imageY = Math.trunc(i / width) + this.top;
+                
+                // 检查该像素是否与其他掩码重叠
                 for (const other of others) {
                     const box = {
                         left: other.left,
@@ -2267,11 +2421,16 @@ export class MaskShape extends Shape {
                         right: other.right,
                         bottom: other.bottom,
                     };
+                    
+                    // 转换到其他掩码的局部坐标系
                     const translatedX = imageX - box.left;
                     const translatedY = imageY - box.top;
                     const [otherWidth, otherHeight] = [box.right - box.left + 1, box.bottom - box.top + 1];
+                    
+                    // 如果像素在其他掩码范围内，清除该位置的像素
                     if (translatedX >= 0 && translatedX < otherWidth &&
                         translatedY >= 0 && translatedY < otherHeight) {
+                        // 懒加载：只在需要时才转换其他掩码
                         masks[other.clientID] = masks[other.clientID] ||
                             rle2Mask(other.points, otherWidth, otherHeight);
                         const j = translatedY * otherWidth + translatedX;
@@ -2282,14 +2441,19 @@ export class MaskShape extends Shape {
             }
         }
 
+        // 保存原始状态用于撤销操作
         const wrapper = {
             stashedPoints: Object.values(updatedObjects).map((object) => object.points),
             stashedRemoved: Object.values(updatedObjects).map((object) => object.removed),
         };
 
+        // 处理更新后的掩码数据
         let emptyMaskOccurred = false;
         for (const object of Object.values(updatedObjects)) {
+            // 将二维数组转换回RLE编码
             const points = mask2Rle(masks[object.clientID]);
+            
+            // 如果掩码像素过少，标记为已移除
             if (points.length < 2) {
                 object.removed = true;
                 emptyMaskOccurred = true;
@@ -2298,20 +2462,26 @@ export class MaskShape extends Shape {
                 object.updated = Date.now();
             }
         }
-        masks = null;
+        masks = null; // 释放内存
 
+        // 定义撤销操作
         const undo = (): void => {
             const updatedStashedPoints = Object.values(updatedObjects).map((object) => object.points);
             const updatedStashedRemoved = Object.values(updatedObjects).map((object) => object.removed);
+            
+            // 恢复原始状态
             for (const [index, object] of Object.values(updatedObjects).entries()) {
                 object.points = wrapper.stashedPoints[index];
                 object.removed = wrapper.stashedRemoved[index];
                 object.updated = Date.now();
             }
+            
+            // 更新包装器状态
             wrapper.stashedPoints = updatedStashedPoints;
             wrapper.stashedRemoved = updatedStashedRemoved;
         };
 
+        // 重做操作与撤销相同（可逆操作）
         const redo = undo;
         return {
             clientIDs: Object.keys(updatedObjects).map((clientID) => +clientID),
@@ -2321,7 +2491,20 @@ export class MaskShape extends Shape {
         };
     }
 
+/**
+     * 保存掩码点数据 - 处理掩码更新和历史记录
+     * 
+     * 功能特点：
+     * - 支持撤销/重做操作
+     * - 可选的底层像素移除功能
+     * - 自动处理空掩码情况
+     * - 维护历史记录的一致性
+     * 
+     * @param maskPoints - 新的掩码点数据(RLE编码，最后4个是边界框坐标)
+     * @param frame - 当前帧号
+     */
     protected savePoints(maskPoints: number[], frame: number): void {
+        // 保存当前状态用于撤销操作
         const undoPoints = this.points;
         const undoLeft = this.left;
         const undoRight = this.right;
@@ -2329,12 +2512,14 @@ export class MaskShape extends Shape {
         const undoBottom = this.bottom;
         const undoSource = this.source;
 
+        // 从新数据中提取边界框坐标
         const [redoLeft, redoTop, redoRight, redoBottom] = maskPoints.splice(-4);
         const points = maskPoints;
 
         const redoPoints = points;
         const redoSource = computeNewSource(this.source);
 
+        // 定义撤销操作
         const undo = (): void => {
             this.points = undoPoints;
             this.source = undoSource;
@@ -2345,6 +2530,7 @@ export class MaskShape extends Shape {
             this.updated = Date.now();
         };
 
+        // 定义重做操作
         const redo = (): void => {
             this.points = redoPoints;
             this.source = redoSource;
@@ -2355,7 +2541,10 @@ export class MaskShape extends Shape {
             this.updated = Date.now();
         };
 
+        // 先执行重做操作以应用新状态
         redo();
+        
+        // 如果启用了底层像素移除功能，处理重叠区域
         if (config.removeUnderlyingMaskPixels.enabled) {
             const {
                 clientIDs,
@@ -2363,9 +2552,13 @@ export class MaskShape extends Shape {
                 undo: undoWithUnderlyingPixels,
                 redo: redoWithUnderlyingPixels,
             } = this.removeUnderlyingPixels(frame);
+            
+            // 处理空掩码情况
             if (emptyMaskOccurred) {
                 config.removeUnderlyingMaskPixels?.onEmptyMaskOccurrence();
             }
+            
+            // 记录包含底层像素移除的复合操作
             this.history.do(
                 HistoryActions.CHANGED_POINTS,
                 () => {
@@ -2380,6 +2573,7 @@ export class MaskShape extends Shape {
                 frame,
             );
         } else {
+            // 记录简单的点变更操作
             this.history.do(
                 HistoryActions.CHANGED_POINTS,
                 undo,
@@ -2390,23 +2584,49 @@ export class MaskShape extends Shape {
         }
     }
 
+/**
+     * 计算点到掩码的距离
+     * 
+     * 算法原理：
+     * - 使用RLE(Run-Length Encoding)编码快速定位点位置
+     * - 通过累积计数判断点是否在掩码内部
+     * - 返回0表示点在掩码内部，null表示在外部
+     * 
+     * RLE编码格式：[count1, count2, count3, ...]
+     * 其中奇数索引表示背景(0)，偶数索引表示前景(1)
+     * 
+     * @param rle - RLE编码的掩码数据，最后4个是边界框坐标
+     * @param x - 点的x坐标
+     * @param y - 点的y坐标
+     * @returns 点在掩码内部返回0，外部返回null
+     */
     static distance(rle: number[], x: number, y: number): null | number {
+        // 提取边界框坐标 [left, top, right, bottom]
         const [left, top, right, bottom] = rle.slice(-4);
         const [width, height] = [right - left + 1, bottom - top + 1];
+        
+        // 转换到掩码局部坐标系
         const [translatedX, translatedY] = [x - left, y - top];
+        
+        // 检查点是否在边界框内
         if (translatedX < 0 || translatedX >= width || translatedY < 0 || translatedY >= height) {
             return null;
         }
 
+        // 计算在RLE编码中的偏移位置
         const offset = Math.floor(translatedY) * width + Math.floor(translatedX);
-        let sum = 0;
-        let value = 0;
+        let sum = 0;    // 累积的像素计数
+        let value = 0;  // 当前段的值(0=背景, 1=前景)
 
+        // 遍历RLE编码，找到点所在的段
         for (const count of rle) {
             sum += count;
             if (sum > offset) {
+                // 如果当前段是前景(value=1)，返回0(点在内部)
+                // 如果当前段是背景(value=0)，返回null(点在外部)
                 return value || null;
             }
+            // 切换前景/背景状态
             value = Math.abs(value - 1);
         }
 

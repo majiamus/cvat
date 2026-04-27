@@ -270,46 +270,65 @@ export default function ControlsSideBarComponent(props: Props): JSX.Element {
         },
     };
 
+    /**
+     * 处理绘制模式切换的核心函数
+     * 响应快捷键 'N' 的按下事件，根据当前画布状态执行不同操作：
+     * - 绘制状态下：结束当前绘制操作
+     * - 编辑状态下：结束当前编辑操作
+     * - 其他状态下：取消当前操作并根据action参数重试绘制
+     *
+     * @param event - 键盘事件对象（可选），用于阻止默认行为
+     * @param action - 操作类型，'draw' 表示重新开始绘制，'redraw' 表示重新绘制
+     */
     const handleDrawMode = (event: KeyboardEvent | undefined, action: 'draw' | 'redraw'): void => {
+        // 阻止事件的默认行为，防止浏览器默认快捷键冲突
         preventDefault(event);
+
+        // 定义所有绘制相关的控件类型，用于判断当前是否处于绘制状态
         const drawing = [
-            ActiveControl.DRAW_POINTS,
-            ActiveControl.DRAW_POLYGON,
-            ActiveControl.DRAW_POLYLINE,
-            ActiveControl.DRAW_RECTANGLE,
-            ActiveControl.DRAW_CUBOID,
-            ActiveControl.DRAW_ELLIPSE,
-            ActiveControl.DRAW_SKELETON,
-            ActiveControl.DRAW_MASK,
-            ActiveControl.AI_TOOLS,
-            ActiveControl.OPENCV_TOOLS,
+            ActiveControl.DRAW_POINTS,      // 点绘制
+            ActiveControl.DRAW_POLYGON,     // 多边形绘制
+            ActiveControl.DRAW_POLYLINE,    // 折线绘制
+            ActiveControl.DRAW_RECTANGLE,   // 矩形绘制
+            ActiveControl.DRAW_CUBOID,      // 立方体绘制
+            ActiveControl.DRAW_ELLIPSE,     // 椭圆绘制
+            ActiveControl.DRAW_SKELETON,    // 骨骼绘制
+            ActiveControl.DRAW_MASK,        // 遮罩绘制
+            ActiveControl.AI_TOOLS,         // AI工具
+            ActiveControl.OPENCV_TOOLS,     // OpenCV工具
         ].includes(activeControl);
+
+        // 检查画布是否处于编辑模式
         const editing = canvasInstance.mode() === CanvasMode.EDIT;
 
+        // 如果当前不处于绘制状态
         if (!drawing) {
+            // 如果处于编辑状态，结束编辑模式
             if (editing) {
-                // users probably will press N as they are used to do when they want to finish editing
-                // in this case, if a mask or polyline is being edited we probably want to finish editing first
+                // 用户可能习惯按 N 键来结束编辑，特别是编辑遮罩或折线时
+                // 在这种情况下，我们应该先完成编辑操作
                 canvasInstance.edit({ enabled: false });
                 return;
             }
 
+            // 取消当前所有操作
             canvasInstance.cancel();
-            // repeatDrawShape gets all the latest parameters
-            // and calls canvasInstance.draw() with them
 
+            // repeatDrawShape 会获取最新的参数并调用 canvasInstance.draw() 重新开始绘制
             if (action === 'draw') {
-                repeatDrawShape();
+                repeatDrawShape();  // 重新开始绘制
             } else {
-                redrawShape();
+                redrawShape();      // 重新绘制
             }
         } else {
+            // 如果当前处于 AI 工具或 OpenCV 工具的绘制状态
             if ([ActiveControl.AI_TOOLS, ActiveControl.OPENCV_TOOLS].includes(activeControl)) {
-                // separated API method
+                // 使用专门的 API 方法来结束交互模式
                 canvasInstance.interact({ enabled: false });
                 return;
             }
 
+            // 结束当前绘制操作，这是快捷键 'N' 的核心功能
             canvasInstance.draw({ enabled: false });
         }
     };

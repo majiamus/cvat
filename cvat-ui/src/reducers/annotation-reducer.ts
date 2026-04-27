@@ -23,7 +23,17 @@ import {
     Workspace,
 } from '.';
 
+/**
+ * 更新激活状态的ID，确保在新的状态列表中仍然有效
+ * 当状态列表更新后，检查之前激活的状态是否仍然存在于新列表中
+ * 
+ * @param {any[]} newStates - 新的状态列表
+ * @param {number | null} prevActivatedStateID - 之前激活状态的ID
+ * @returns {number | null} 返回有效的激活状态ID，如果之前的状态不存在则返回null
+ */
 function updateActivatedStateID(newStates: any[], prevActivatedStateID: number | null): number | null {
+    // 如果之前没有激活状态，或者之前激活的状态仍然存在于新状态列表中，则保持原ID
+    // 否则返回null，表示没有有效的激活状态
     return prevActivatedStateID === null || newStates.some((_state: any) => _state.clientID === prevActivatedStateID) ?
         prevActivatedStateID :
         null;
@@ -513,14 +523,23 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
+        /**
+         * 处理记录绘制对象配置的action
+         * 保存当前绘制对象的参数，更新画布控制状态和绘制状态
+         */
         case AnnotationActionTypes.REMEMBER_OBJECT: {
+            // 从action中解构获取载荷数据
             const { payload } = action;
 
+            // 获取当前画布的活动控制状态
             let { activeControl } = state.canvas;
+            // 如果需要更新当前控制状态
             if (payload.updateCurrentControl) {
+                // 如果是标签类型，设置控制为光标
                 if ('activeObjectType' in payload && payload.activeObjectType === ObjectType.TAG) {
                     activeControl = ActiveControl.CURSOR;
                 } else if ('activeShapeType' in payload) {
+                    // 创建形状类型到控制状态的映射
                     const controlMapping = {
                         [ShapeType.RECTANGLE]: ActiveControl.DRAW_RECTANGLE,
                         [ShapeType.POLYGON]: ActiveControl.DRAW_POLYGON,
@@ -532,21 +551,26 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                         [ShapeType.MASK]: ActiveControl.DRAW_MASK,
                     };
 
+                    // 根据形状类型设置对应的控制状态
                     activeControl = controlMapping[payload.activeShapeType as ShapeType];
                 }
             }
 
+            // 返回新的状态，更新标注状态、画布状态和绘制状态
             return {
                 ...state,
                 annotations: {
                     ...state.annotations,
+                    // 清除当前激活的状态ID
                     activatedStateID: null,
                 },
                 canvas: {
                     ...state.canvas,
+                    // 更新画布的活动控制状态
                     activeControl,
                 },
                 drawing: {
+                    // 合并默认绘制状态和载荷中的绘制参数
                     ...defaultState.drawing,
                     ...payload,
                 },
@@ -567,18 +591,26 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
+        /**
+         * 处理更新活动控件的action
+         * 更新画布的活动控件，重置激活状态ID，并重置上下文菜单
+         */
         case AnnotationActionTypes.UPDATE_ACTIVE_CONTROL: {
+            // 从action payload中获取活动控件
             const { activeControl } = action.payload;
 
             return {
                 ...state,
                 annotations: {
                     ...state.annotations,
+                    // 重置激活状态ID，确保没有对象处于激活状态
                     activatedStateID: null,
                 },
                 canvas: {
                     ...state.canvas,
+                    // 设置新的活动控件
                     activeControl,
+                    // 重置上下文菜单到默认状态
                     contextMenu: {
                         ...defaultState.canvas.contextMenu,
                     },
@@ -635,22 +667,32 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
+        /**
+         * 处理激活标注对象的action
+         * 当用户点击或选择一个标注对象时，更新当前激活的对象状态
+         */
         case AnnotationActionTypes.ACTIVATE_OBJECT: {
+            // 从action载荷中解构获取要激活的对象ID、元素ID和属性ID
             const { activatedStateID, activatedElementID, activatedAttributeID } = action.payload;
+            // 从当前状态中解构获取画布状态和标注状态
             const {
                 canvas: { activeControl, instance },
                 annotations: { highlightedConflict, states },
             } = state;
 
+            // 检查要激活的对象是否存在
             const objectDoesNotExist = activatedStateID !== null &&
                 !states.some((_state) => _state.clientID === activatedStateID);
+            // 检查画布是否处于可操作状态（空闲模式且光标控制激活）
             const canvasIsNotReady = (instance as Canvas | Canvas3d)
                 .mode() !== CanvasMode.IDLE || activeControl !== ActiveControl.CURSOR;
 
+            // 如果对象不存在、画布未就绪或存在高亮冲突，则不更新状态
             if (objectDoesNotExist || canvasIsNotReady || highlightedConflict) {
                 return state;
             }
 
+            // 返回新的状态，更新激活的对象ID、元素ID和属性ID
             return {
                 ...state,
                 annotations: {
@@ -682,12 +724,19 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
+        /**
+         * 处理隐藏/显示当前编辑对象的action
+         * 更新画布状态中的activeObjectHidden属性，控制编辑对象的可见性
+         */
         case AnnotationActionTypes.HIDE_ACTIVE_OBJECT: {
+            // 从action载荷中解构获取hide值，表示是否隐藏对象
             const { hide } = action.payload;
+            // 返回新的状态，保持其他状态不变，只更新canvas.activeObjectHidden
             return {
                 ...state,
                 canvas: {
                     ...state.canvas,
+                    // 设置活动对象的隐藏状态
                     activeObjectHidden: hide,
                 },
             };
@@ -919,8 +968,14 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
+        /**
+         * 处理成功获取标注数据的action
+         * 更新应用状态中的标注数据，包括状态列表、历史记录和Z轴范围
+         */
         case AnnotationActionTypes.FETCH_ANNOTATIONS_SUCCESS: {
+            // 保留当前激活状态的ID，用于后续更新
             const { activatedStateID } = state.annotations;
+            // 从action payload中解构获取标注数据
             const {
                 states, history, minZ, maxZ,
             } = action.payload;
@@ -929,10 +984,15 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 ...state,
                 annotations: {
                     ...state.annotations,
+                    // 更新激活状态ID，确保在新的状态列表中仍然有效
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
+                    // 更新标注状态列表
                     states,
+                    // 更新标注历史记录
                     history,
+                    // 标记标注数据已初始化
                     initialized: true,
+                    // 更新Z轴范围，并确保当前Z值在有效范围内
                     zLayer: {
                         min: minZ,
                         max: maxZ,
@@ -941,11 +1001,16 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
+        /**
+         * 处理获取标注数据失败的action
+         * 即使获取失败，也标记标注数据已初始化，避免重复请求
+         */
         case AnnotationActionTypes.FETCH_ANNOTATIONS_FAILED: {
             return {
                 ...state,
                 annotations: {
                     ...state.annotations,
+                    // 标记标注数据已初始化，即使获取失败
                     initialized: true,
                 },
             };

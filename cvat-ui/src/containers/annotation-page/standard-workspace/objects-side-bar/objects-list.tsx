@@ -459,26 +459,44 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
             objectStates, sortedStatesID, statesOrdering, filteredStates,
         } = this.state;
 
+        /**
+         * 阻止键盘事件的默认行为
+         * @param event - 键盘事件对象，可能为undefined
+         * @private
+         */
         const preventDefault = (event: KeyboardEvent | undefined): void => {
+            // 只有当事件对象存在时才阻止默认行为
             if (event) {
                 event.preventDefault();
             }
         };
 
+        /**
+         * 获取当前激活的标注对象
+         * @param ignoreElements - 是否忽略元素级别的激活状态，默认false
+         * @returns 返回激活的对象状态或元素状态，如果没有激活项则返回null
+         * @private
+         */
         const activatedState = (ignoreElements = false): ObjectState | null => {
+            // 检查是否有激活的对象状态ID
             if (activatedStateID !== null) {
+                // 在对象状态列表中查找匹配的对象
                 const state = objectStates
                     .find((objectState: ObjectState): boolean => objectState.clientID === activatedStateID);
 
+                // 如果找到标注对象，且存在激活的元素ID，并且不忽略元素级别
                 if (state && activatedElementID !== null && !ignoreElements) {
+                    // 在标注对象的元素中查找匹配的元素
                     const element = state.elements
                         .find((_element: ObjectState): boolean => _element.clientID === activatedElementID);
-                    return element || null;
+                    return element || null;  // 返回找到的元素或null
                 }
 
+                // 返回标注对象或null
                 return state || null;
             }
 
+            // 没有激活的对象状态ID时返回null
             return null;
         };
 
@@ -549,50 +567,84 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
                     updateAnnotations([state]);
                 }
             },
+            /**
+             * 删除对象快捷键处理函数
+             * 支持普通删除(del)和强制删除(shift+del)模式
+             * @param event - 键盘事件对象，可能为undefined
+             * @private
+             */
             DELETE_OBJECT_STANDARD_WORKSPACE: (event: KeyboardEvent | undefined) => {
-                preventDefault(event);
-                const state = activatedState(true);
+                preventDefault(event);  // 阻止默认行为
+                const state = activatedState(true);  // 获取激活状态（忽略元素级别）
                 if (state && !readonly) {
+                    // 如果按下了shift键，则强制删除；否则普通删除
                     removeObject(state, event ? event.shiftKey : false);
                 }
             },
+            /**
+             * 更改对象颜色快捷键处理函数
+             * 根据颜色模式(GROUP或INSTANCE)循环切换颜色
+             * @param event - 键盘事件对象，可能为undefined
+             * @private
+             */
             CHANGE_OBJECT_COLOR: (event: KeyboardEvent | undefined) => {
-                preventDefault(event);
-                const state = activatedState();
+                preventDefault(event);  // 阻止默认行为
+                const state = activatedState();  // 获取激活状态
                 if (state) {
+                    // 如果按组着色且对象有组信息
                     if (colorBy === ColorBy.GROUP && state.group) {
-                        const colorID = (colors.indexOf(state.group.color) + 1) % colors.length;
-                        changeGroupColor(state.group.id, colors[colorID]);
+                        const colorID = (colors.indexOf(state.group.color) + 1) % colors.length;  // 计算下一个颜色索引
+                        changeGroupColor(state.group.id, colors[colorID]);  // 更改组颜色
                         return;
                     }
 
+                    // 如果按实例着色
                     if (colorBy === ColorBy.INSTANCE) {
-                        const colorID = (colors.indexOf(state.color) + 1) % colors.length;
-                        state.color = colors[colorID];
-                        updateAnnotations([state]);
+                        const colorID = (colors.indexOf(state.color) + 1) % colors.length;  // 计算下一个颜色索引
+                        state.color = colors[colorID];  // 直接修改对象颜色
+                        updateAnnotations([state]);  // 更新标注
                     }
                 }
             },
+            /**
+             * 将对象移至背景层快捷键处理函数
+             * 设置对象的z-order为最小值减1，使其显示在最底层
+             * @param event - 键盘事件对象，可能为undefined
+             * @private
+             */
             TO_BACKGROUND: (event: KeyboardEvent | undefined) => {
-                preventDefault(event);
-                const state = activatedState(true);
+                preventDefault(event);  // 阻止默认行为
+                const state = activatedState(true);  // 获取激活状态（忽略元素级别）
                 if (state && !readonly && state.objectType !== ObjectType.TAG) {
-                    state.zOrder = minZLayer - 1;
-                    updateAnnotations([state]);
+                    // 标签类型的对象不支持层级调整
+                    state.zOrder = minZLayer - 1;  // 设置z-order为最小值减1
+                    updateAnnotations([state]);  // 更新标注
                 }
             },
+            /**
+             * 将对象移至前景层快捷键处理函数
+             * 设置对象的z-order为最大值加1，使其显示在最顶层
+             * @param event - 键盘事件对象，可能为undefined
+             * @private
+             */
             TO_FOREGROUND: (event: KeyboardEvent | undefined) => {
-                preventDefault(event);
-                const state = activatedState(true);
+                preventDefault(event);  // 阻止默认行为
+                const state = activatedState(true);  // 获取激活状态（忽略元素级别）
                 if (state && !readonly && state.objectType !== ObjectType.TAG) {
-                    state.zOrder = maxZLayer + 1;
-                    updateAnnotations([state]);
+                    // 标签类型的对象不支持层级调整
+                    state.zOrder = maxZLayer + 1;  // 设置z-order为最大值加1
+                    updateAnnotations([state]);  // 更新标注
                 }
             },
+            /**
+             * 复制形状快捷键处理函数
+             * 复制当前激活的形状对象
+             * @private
+             */
             COPY_SHAPE: () => {
-                const state = activatedState(true);
+                const state = activatedState(true);  // 获取激活状态（忽略元素级别）
                 if (state && !readonly) {
-                    copyShape(state);
+                    copyShape(state);  // 执行复制操作
                 }
             },
             RUN_ANNOTATIONS_ACTION: () => {

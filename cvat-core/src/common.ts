@@ -19,15 +19,30 @@ export function isEmail(value): boolean {
 }
 
 // Called with specific Enum context
+/**
+ * 检查给定值是否为枚举中的有效值
+ * 该函数通过遍历枚举对象的所有属性来验证值是否存在
+ * 
+ * @param {any} value - 要检查的值
+ * @returns {boolean} - 如果值存在于枚举中返回true，否则返回false
+ * @example
+ * const Color = { RED: 'red', BLUE: 'blue' };
+ * Color.isEnum('red'); // true
+ * Color.isEnum('green'); // false
+ */
 export function isEnum(value): boolean {
+    // 遍历枚举对象的所有属性
     for (const key in this) {
+        // 只检查对象自身的属性（不包括原型链上的属性）
         if (Object.prototype.hasOwnProperty.call(this, key)) {
+            // 如果找到匹配的值，返回true
             if (this[key] === value) {
                 return true;
             }
         }
     }
 
+    // 遍历完所有属性后仍未找到匹配值，返回false
     return false;
 }
 

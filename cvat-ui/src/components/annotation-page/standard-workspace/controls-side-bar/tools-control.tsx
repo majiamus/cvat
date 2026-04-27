@@ -212,26 +212,32 @@ function registerPlugin(): (callback: null | (() => void)) => void {
 const onRemoveAnnotations = registerPlugin();
 
 export class ToolsControlComponent extends React.PureComponent<Props, State> {
+/**
+     * 交互状态管理对象
+     * 存储AI交互过程中的状态信息、请求数据和响应结果
+     * 用于管理交互会话的生命周期和数据传递
+     * @private
+     */
     private interaction: {
-        id: string | null;
-        isAborted: boolean;
+        id: string | null;  // 当前交互会话的唯一标识符，用于跟踪交互会话
+        isAborted: boolean;  // 标记交互是否被中止，用于控制交互流程的终止
         latestResponse: {
-            rle: number[];
-            points: [number, number][];
-            bounds?: [number, number, number, number];
+            rle: number[];  // RLE（Run Length Encoding）格式的掩码数据
+            points: [number, number][];  // 多边形点坐标数组，格式为[x,y]坐标对
+            bounds?: [number, number, number, number];  // 可选的边界框，格式为[x1,y1,x2,y2]
         };
-        latestPostponedEvent: Event | null;
-        latestApproximatedPoints: number[][];
+        latestPostponedEvent: Event | null;  // 最新延迟事件，用于处理异步事件队列
+        latestApproximatedPoints: number[][];  // 最新近似处理后的点坐标，用于显示中间结果
         latestRequest: null | {
-            interactor: MLModel;
+            interactor: MLModel;  // 使用的AI交互器模型
             data: {
-                frame: number;
-                neg_points: number[][];
-                pos_points: number[][];
-                obj_bbox: number[][];
+                frame: number;  // 当前处理的帧号
+                neg_points: number[][];  // 负样本点坐标（背景点）
+                pos_points: number[][];  // 正样本点坐标（前景点）
+                obj_bbox: number[][];  // 对象边界框，用于限定交互区域
             };
         } | null;
-        hideMessage: (() => void) | null;
+        hideMessage: (() => void) | null;  // 隐藏消息提示的函数，用于清理加载状态提示
     };
 
     public constructor(props: Props) {
@@ -377,132 +383,168 @@ export class ToolsControlComponent extends React.PureComponent<Props, State> {
         }
     };
 
+/**
+     * 运行交互请求的异步方法
+     * 处理与AI交互器的通信，获取交互结果并更新画布状态
+     * @param interactionId - 当前交互会话的唯一标识符
+     * @private
+     */
     private runInteractionRequest = async (interactionId: string): Promise<void> => {
-        const { jobInstance, canvasInstance } = this.props;
-        const { activeInteractor, fetching, convertMasksToPolygons } = this.state;
+        const { jobInstance, canvasInstance } = this.props;  // 获取作业实例和画布实例
+        const { activeInteractor, fetching, convertMasksToPolygons } = this.state;  // 获取交互器状态和配置
 
         const { id, latestRequest } = this.interaction;
+        
+        // 验证交互请求的有效性：ID匹配、存在请求、不处于获取状态
         if (id !== interactionId || !latestRequest || fetching) {
-            // current interaction request is not relevant (new interaction session has started)
-            // or a user didn't add more points
-            // or one server request is on processing
+            // 当前交互请求无效（新交互会话已开始、用户未添加更多点、或服务器请求正在处理中）
             return;
         }
 
         const { interactor, data } = latestRequest;
-        this.interaction.latestRequest = null;
+        this.interaction.latestRequest = null;  // 清空最新请求，避免重复处理
 
         try {
+            // 显示加载提示，等待交互器响应
             this.interaction.hideMessage = message.loading({
                 content: `Waiting for a response from ${activeInteractor?.name}`,
                 duration: 0,
                 className: 'cvat-tracking-notice',
             });
+            
             try {
-                // run server request
-                this.setState({ fetching: true });
+                // 执行服务器请求
+                this.setState({ fetching: true });  // 设置获取状态为true
 
+                // 调用核心lambda函数与交互器通信
                 const response = await core.lambda.call(
                     jobInstance.taskId,
                     interactor,
                     { ...data, job: jobInstance.id },
                 ) as InteractorResults;
 
-                // if only mask presented, let's receive points
+                // 如果只有掩码数据而没有点数据，从掩码中提取点
                 if (response.mask && !response.points) {
-                    const left = response.bounds ? response.bounds[0] : 0;
-                    const top = response.bounds ? response.bounds[1] : 0;
+                    const left = response.bounds ? response.bounds[0] : 0;   // 边界左坐标
+                    const top = response.bounds ? response.bounds[1] : 0;    // 边界上坐标
                     response.points = await this.receivePointsFromMask(response.mask, left, top);
                 }
 
-                // approximation with cv.approxPolyDP
+                // 使用cv.approxPolyDP算法对响应点进行近似处理
                 const approximated = await this.approximateResponsePoints(response.points as [number, number][]);
+                
+                // 将掩码数据转换为RLE（Run Length Encoding）格式
                 const rle = core.utils.mask2Rle(response.mask.flat());
+                
+                // 设置RLE数据的边界信息
                 if (response.bounds) {
-                    rle.push(...response.bounds);
+                    rle.push(...response.bounds);  // 使用响应中的边界
                 } else {
+                    // 如果没有边界信息，根据掩码尺寸计算边界
                     const height = response.mask.length;
                     const width = response.mask[0].length;
                     rle.push(0, 0, width - 1, height - 1);
                 }
 
+                // 检查交互会话是否仍然有效（未被中止或替换）
                 if (this.interaction.id !== interactionId || this.interaction.isAborted) {
-                    // new interaction session or the session is aborted
+                    // 新交互会话已开始，或当前会话已中止
                     return;
                 }
 
+                // 更新交互响应数据
                 this.interaction.latestResponse = {
-                    bounds: response.bounds,
-                    points: response.points as [number, number][],
-                    rle,
+                    bounds: response.bounds,                    // 边界信息
+                    points: response.points as [number, number][],  // 点坐标数组
+                    rle,                                       // RLE格式的掩码数据
                 };
-                this.interaction.latestApproximatedPoints = approximated;
+                this.interaction.latestApproximatedPoints = approximated;  // 近似处理后的点
 
+                // 更新状态：标记是否接收到点数据
                 this.setState({ pointsReceived: !!response.points?.length });
             } finally {
+                // 清理加载消息和状态
                 if (this.interaction.id === interactionId && this.interaction.hideMessage) {
-                    this.interaction.hideMessage();
+                    this.interaction.hideMessage();  // 隐藏加载消息
                     this.interaction.hideMessage = null;
                 }
 
-                this.setState({ fetching: false });
+                this.setState({ fetching: false });  // 重置获取状态
             }
 
+            // 如果有近似点数据，更新画布交互状态
             if (this.interaction.latestApproximatedPoints.length) {
                 canvasInstance.interact({
-                    enabled: true,
+                    enabled: true,  // 启用交互
                     intermediateShape: {
-                        shapeType: convertMasksToPolygons ? ShapeType.POLYGON : ShapeType.MASK,
+                        shapeType: convertMasksToPolygons ? ShapeType.POLYGON : ShapeType.MASK,  // 根据配置选择形状类型
                         points: convertMasksToPolygons ? this.interaction.latestApproximatedPoints.flat() :
-                            this.interaction.latestResponse.rle,
+                            this.interaction.latestResponse.rle,  // 选择相应的点数据格式
                     },
                 });
             }
 
+            // 设置定时器继续处理交互请求（实现轮询效果）
             setTimeout(() => this.runInteractionRequest(interactionId));
         } catch (error: any) {
+            // 处理交互错误，显示错误通知
             notification.error({
                 description: <CVATMarkdown>{error.message}</CVATMarkdown>,
-                message: 'Interaction error occurred',
-                duration: null,
+                message: 'Interaction error occurred',  // 错误标题
+                duration: null,  // 不自动关闭
             });
         }
     };
 
+/**
+     * 处理交互事件的回调函数
+     * 监听交互事件，根据交互状态执行相应的处理逻辑
+     * @param e - 自定义交互事件，包含形状更新和完成状态
+     * @private
+     */
     private onInteraction = (e: Event): void => {
-        const { frame, isActivated } = this.props;
-        const { activeInteractor } = this.state;
+        const { frame, isActivated } = this.props;      // 获取当前帧号和激活状态
+        const { activeInteractor } = this.state;      // 获取当前活动的交互器
 
+        // 如果工具未激活，直接返回
         if (!isActivated) {
             return;
         }
 
+        // 如果交互ID不存在，生成唯一的交互ID
         if (!this.interaction.id) {
             this.interaction.id = lodash.uniqueId('interaction_');
         }
 
+        // 从自定义事件中解构所需数据
         const { shapesUpdated, isDone, shapes } = (e as CustomEvent).detail;
+        
         if (isDone) {
-            // make an object from current result
-            // do not make one more request
-            // prevent future requests if possible
+            // 交互完成时的处理逻辑
+            // 标记交互为中止状态，防止后续请求
             this.interaction.isAborted = true;
             this.interaction.latestRequest = null;
+            
+            // 如果存在近似点，基于这些点构建对象
             if (this.interaction.latestApproximatedPoints.length) {
                 this.constructFromPoints();
             }
         } else if (shapesUpdated) {
+            // 形状更新时的处理逻辑
             const interactor = activeInteractor as MLModel;
+            
+            // 构建最新的交互请求数据
             this.interaction.latestRequest = {
-                interactor,
+                interactor,  // 交互器实例
                 data: {
-                    frame,
-                    obj_bbox: convertShapesForInteractor(shapes, 'rectangle', 0),
-                    pos_points: convertShapesForInteractor(shapes, 'points', 0),
-                    neg_points: convertShapesForInteractor(shapes, 'points', 2),
+                    frame,    // 当前帧号
+                    obj_bbox: convertShapesForInteractor(shapes, 'rectangle', 0),  // 转换为边界框格式
+                    pos_points: convertShapesForInteractor(shapes, 'points', 0),   // 转换为正样本点格式
+                    neg_points: convertShapesForInteractor(shapes, 'points', 2),   // 转换为负样本点格式
                 },
             };
 
+            // 运行交互请求
             this.runInteractionRequest(this.interaction.id);
         }
     };
@@ -872,38 +914,45 @@ export class ToolsControlComponent extends React.PureComponent<Props, State> {
         }
     }
 
+/**
+     * 从交互点构建标注对象的异步方法
+     * 根据交互结果创建多边形或掩码对象，并添加到画布中
+     * @private
+     */
     private async constructFromPoints(): Promise<void> {
-        const { convertMasksToPolygons } = this.state;
+        const { convertMasksToPolygons } = this.state;  // 获取是否转换为多边形的标志
         const {
             frame, labels, curZOrder, activeLabelID, createAnnotations,
-        } = this.props;
+        } = this.props;  // 解构所需的props属性
 
         if (convertMasksToPolygons) {
+            // 创建多边形对象的情况
             const object = new core.classes.ObjectState({
-                frame,
-                objectType: ObjectType.SHAPE,
-                source: core.enums.Source.SEMI_AUTO,
-                label: labels.find((label) => label.id === activeLabelID as number) as Label,
-                shapeType: ShapeType.POLYGON,
-                points: this.interaction.latestApproximatedPoints.flat(),
-                occluded: false,
-                zOrder: curZOrder,
+                frame,                                          // 当前帧号
+                objectType: ObjectType.SHAPE,                  // 对象类型：形状
+                source: core.enums.Source.SEMI_AUTO,          // 来源：半自动
+                label: labels.find((label) => label.id === activeLabelID as number) as Label,  // 根据ID查找对应的标签
+                shapeType: ShapeType.POLYGON,                 // 形状类型：多边形
+                points: this.interaction.latestApproximatedPoints.flat(),  // 将近似点数组扁平化
+                occluded: false,                               // 默认不遮挡
+                zOrder: curZOrder,                           // 当前Z轴顺序
             });
 
-            createAnnotations([object]);
+            createAnnotations([object]);  // 创建多边形标注
         } else {
+            // 创建掩码对象的情况
             const object = new core.classes.ObjectState({
-                frame,
-                objectType: ObjectType.SHAPE,
-                source: core.enums.Source.SEMI_AUTO,
-                label: labels.find((label) => label.id === activeLabelID as number) as Label,
-                shapeType: ShapeType.MASK,
-                points: this.interaction.latestResponse.rle,
-                occluded: false,
-                zOrder: curZOrder,
+                frame,                                          // 当前帧号
+                objectType: ObjectType.SHAPE,                  // 对象类型：形状
+                source: core.enums.Source.SEMI_AUTO,          // 来源：半自动
+                label: labels.find((label) => label.id === activeLabelID as number) as Label,  // 根据ID查找对应的标签
+                shapeType: ShapeType.MASK,                    // 形状类型：掩码
+                points: this.interaction.latestResponse.rle,  // 使用RLE格式的掩码数据
+                occluded: false,                               // 默认不遮挡
+                zOrder: curZOrder,                           // 当前Z轴顺序
             });
 
-            createAnnotations([object]);
+            createAnnotations([object]);  // 创建掩码标注
         }
     }
 
@@ -1144,6 +1193,14 @@ export class ToolsControlComponent extends React.PureComponent<Props, State> {
                 </div>
                 <Row align='middle' justify='end'>
                     <Col>
+                        {/**
+                         * AI交互按钮组件
+                         * 用于启动AI辅助的交互式标注模式，允许用户通过点击正负样本点来创建或调整标注
+                         * 按钮在以下情况下被禁用：
+                         * - 没有活动的交互器
+                         * - 正在获取数据
+                         * - 交互器版本低于最低支持版本
+                         */}
                         <Button
                             type='primary'
                             loading={fetching}
@@ -1152,12 +1209,21 @@ export class ToolsControlComponent extends React.PureComponent<Props, State> {
                                 fetching ||
                                 activeInteractor.version < MIN_SUPPORTED_INTERACTOR_VERSION}
                             onClick={() => {
+                                /**
+                                 * 处理交互按钮点击事件，启动AI交互式标注模式
+                                 * 检查必要的条件（活动交互器、活动标签ID和标签列表）后，设置交互模式并初始化画布交互
+                                 */
                                 if (activeInteractor && activeLabelID && labels.length) {
+                                    // 设置组件状态为交互模式
                                     this.setState({ mode: 'interaction' });
+                                    
+                                    // 取消任何正在进行的画布操作
                                     canvasInstance.cancel();
+                                    
+                                    // 准备交互器参数，排除可选的startWithBoxOptional参数
                                     const interactorParameters = {
                                         ...omit(activeInteractor.params.canvas, 'startWithBoxOptional'),
-                                        // replace 'optional' with true or false depending on user specified setting
+                                        // 根据用户指定的设置，将'optional'替换为true或false
                                         ...(activeInteractor.params.canvas.startWithBoxOptional ? {
                                             startWithBox: startInteractingWithBox,
                                         } : {
@@ -1165,7 +1231,10 @@ export class ToolsControlComponent extends React.PureComponent<Props, State> {
                                         }),
                                     };
 
+                                    // 启用画布的点交互模式，传入形状类型、启用标志和交互器参数
                                     canvasInstance.interact({ shapeType: 'points', enabled: true, ...interactorParameters });
+                                    
+                                    // 通知应用程序交互已开始，传递交互器、标签ID和参数
                                     onInteractionStart(activeInteractor, activeLabelID, interactorParameters);
                                 }
                             }}

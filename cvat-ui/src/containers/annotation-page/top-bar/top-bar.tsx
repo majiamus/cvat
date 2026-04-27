@@ -445,29 +445,58 @@ class AnnotationTopBarContainer extends React.PureComponent<Props> {
         }
     };
 
+    /**
+     * 处理下一张图片/帧的切换
+     * @private
+     * @async
+     * @returns {Promise<void>}
+     * 
+     * 该函数是CVAT中帧导航的核心逻辑，负责：
+     * 1. 搜索下一个有效的帧（考虑删除帧的显示设置）
+     * 2. 验证是否可以切换到目标帧（画布状态、帧范围等）
+     * 3. 根据导航类型执行不同的切换策略
+     * 4. 处理播放状态的暂停
+     * 
+     * 导航类型说明：
+     * - REGULAR: 普通模式，直接切换帧
+     * - FILTERED: 过滤模式，搜索带注释的帧
+     * - EMPTY: 空帧模式，搜索没有注释的帧
+     */
     private onNextFrame = async (): Promise<void> => {
+        // 解构获取当前组件的属性
         const {
             frameNumber, jobInstance, playing, searchAnnotations,
             onSwitchPlay, showDeletedFrames, navigationType,
         } = this.props;
         const { stopFrame } = jobInstance;
 
+        // 计算搜索起始帧：当前帧+1，但不能超过作业的最后帧
         const frameFrom = Math.min(jobInstance.stopFrame, frameNumber + 1);
+        
+        // 在作业帧范围内搜索下一个有效帧
+        // 参数说明：notDeleted控制是否跳过已删除的帧
         const newFrame = await jobInstance.frames.search(
             { notDeleted: !showDeletedFrames },
             frameFrom,
             jobInstance.stopFrame,
         );
+        
+        // 验证搜索结果：确保找到新帧且与当前帧不同，同时检查是否可以切换
         if (newFrame !== frameNumber && newFrame !== null && isAbleToChangeFrame(newFrame)) {
+            // 如果正在播放，先暂停播放
             if (playing) {
                 onSwitchPlay(false);
             }
 
+            // 根据导航类型执行不同的切换策略
             if (navigationType === NavigationType.REGULAR) {
+                // 普通模式：直接切换到新帧
                 this.changeFrame(newFrame);
             } else if (navigationType === NavigationType.FILTERED) {
+                // 过滤模式：搜索带注释的帧
                 searchAnnotations(jobInstance, newFrame, stopFrame);
             } else {
+                // 空帧模式：搜索没有注释的帧
                 searchAnnotations(jobInstance, newFrame, stopFrame, { isEmptyFrame: true });
             }
         }
@@ -629,11 +658,36 @@ class AnnotationTopBarContainer extends React.PureComponent<Props> {
         }
     }
 
+    /**
+     * 安全地切换到指定帧
+     * @private
+     * @param {number} frame - 目标帧号
+     * @returns {void}
+     * 
+     * 该函数是帧切换的安全包装器，确保：
+     * 1. 只有在画布状态允许的情况下才执行切换
+     * 2. 通过 isAbleToChangeFrame 进行全面的切换条件验证
+     * 3. 调用 Redux action 触发实际的帧切换流程
+     * 
+     * 这个函数通常被以下场景调用：
+     * - 用户点击导航按钮（上一张/下一张）
+     * - 快捷键操作（F/D/V/C等）
+     * - 帧跳转输入框提交
+     * - 过滤导航模式下的自动跳转
+     */
     private changeFrame(frame: number): void {
+        // 从props中解构获取帧切换回调函数
         const { onChangeFrame } = this.props;
+        
+        // 验证是否可以切换到目标帧
+        // isAbleToChangeFrame会检查：画布状态、帧范围、导航阻塞等条件
         if (isAbleToChangeFrame(frame)) {
+            // 触发Redux action，开始帧切换流程
+            // 这会触发changeFrameAsync异步action，获取新帧数据并更新UI
             onChangeFrame(frame);
         }
+        // 注意：如果切换条件不满足，函数静默返回，不执行任何操作
+        // 这是有意为之的设计，避免在不合适的状态下强制切换帧
     }
 
     public render(): JSX.Element {

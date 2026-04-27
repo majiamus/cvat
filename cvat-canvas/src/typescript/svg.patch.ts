@@ -13,38 +13,57 @@ import consts from './consts';
 import { Equation, CuboidModel, Orientation, Edge } from './cuboid';
 import { Point, parsePoints, clamp } from './shared';
 
-// Update constructor
+/**
+ * 更新SVG.Element.prototype.draw构造函数
+ * 修复原始draw方法，确保在创建和销毁处理器的边缘情况下正确工作
+ * 为每个元素添加set属性，用于管理绘制过程中的点集合
+ */
 const originalDraw = SVG.Element.prototype.draw;
 SVG.Element.prototype.draw = function constructor(...args: any): any {
+    // 获取已存在的paint handler
     let handler = this.remember('_paintHandler');
     if (!handler) {
+        // 如果不存在，调用原始draw方法创建handler
         originalDraw.call(this, ...args);
         handler = this.remember('_paintHandler');
-        // There is use case (drawing a single point when handler is created and destructed immediately in one stack)
-        // So, we need to check if handler still exists
+        // 处理边缘情况：绘制单个点时handler可能在同一调用栈中被创建和销毁
+        // 需要检查handler是否仍然存在
         if (handler && !handler.set) {
+            // 为handler添加set属性，用于管理点集合
             handler.set = new SVG.Set();
         }
     } else {
+        // 如果handler已存在，直接调用原始draw方法
         originalDraw.call(this, ...args);
     }
 
     return this;
 };
+
+// 将原始draw方法的所有属性复制到新的draw方法上
 for (const key of Object.keys(originalDraw)) {
     SVG.Element.prototype.draw[key] = originalDraw[key];
 }
 
-// Create undo for polygons and polylines
+/**
+ * 为多边形和折线创建撤销功能
+ * 移除最后绘制的点并更新图形
+ */
 function undo(): void {
+    // 检查是否存在点集合且集合不为空
     if (this.set && this.set.length()) {
+        // 从集合中移除最后一个点并从DOM中删除对应的元素
         this.set.members.splice(-1, 1)[0].remove();
+        // 从数组中移除最后两个值（x, y坐标）
         this.el.array().value.splice(-2, 1);
+        // 重新绘制图形
         this.el.plot(this.el.array());
+        // 触发撤销点事件
         this.el.fire('undopoint');
     }
 }
 
+// 为折线添加撤销功能
 SVG.Element.prototype.draw.extend(
     'polyline',
     Object.assign({}, SVG.Element.prototype.draw.plugins.polyline, {
@@ -52,6 +71,7 @@ SVG.Element.prototype.draw.extend(
     }),
 );
 
+// 为多边形添加撤销功能
 SVG.Element.prototype.draw.extend(
     'polygon',
     Object.assign({}, SVG.Element.prototype.draw.plugins.polygon, {
@@ -59,38 +79,55 @@ SVG.Element.prototype.draw.extend(
     }),
 );
 
+/**
+ * 定义圆形控制点的描边颜色
+ */
 export const CIRCLE_STROKE = '#000';
-// Fix method drawCircles
+
+/**
+ * 修复drawCircles方法
+ * 在图形的每个顶点绘制可拖动的圆形控制点
+ * 用于在绘制和编辑过程中提供视觉反馈和交互点
+ */
 function drawCircles(): void {
+    // 获取图形的所有顶点坐标
     const array = this.el.array().valueOf();
 
+    // 移除所有现有的控制点
     this.set.each(function (): void {
         this.remove();
     });
 
+    // 清空控制点集合
     this.set.clear();
 
+    // 为每个顶点（除最后一个外）创建圆形控制点
     for (let i = 0; i < array.length - 1; ++i) {
+        // 设置当前点的x坐标
         [this.p.x] = array[i];
+        // 设置当前点的y坐标
         [, this.p.y] = array[i];
 
+        // 将点坐标转换为SVG坐标系
         const p = this.p.matrixTransform(
             this.parent.node.getScreenCTM().inverse().multiply(this.el.node.getScreenCTM()),
         );
 
+        // 创建并添加圆形控制点
         this.set.add(
             this.parent
-                .circle(5)
+                .circle(5) // 创建半径为5的圆
                 .stroke({
                     width: 1,
-                    color: CIRCLE_STROKE,
+                    color: CIRCLE_STROKE, // 使用预定义的描边颜色
                 })
-                .fill('#ccc')
-                .center(p.x, p.y),
+                .fill('#ccc') // 设置填充颜色为浅灰色
+                .center(p.x, p.y), // 将圆心设置在转换后的坐标位置
         );
     }
 }
 
+// 为线条添加修复后的drawCircles方法
 SVG.Element.prototype.draw.extend(
     'line',
     Object.assign({}, SVG.Element.prototype.draw.plugins.line, {
@@ -98,6 +135,7 @@ SVG.Element.prototype.draw.extend(
     }),
 );
 
+// 为折线添加修复后的drawCircles方法
 SVG.Element.prototype.draw.extend(
     'polyline',
     Object.assign({}, SVG.Element.prototype.draw.plugins.polyline, {
@@ -105,6 +143,7 @@ SVG.Element.prototype.draw.extend(
     }),
 );
 
+// 为多边形添加修复后的drawCircles方法
 SVG.Element.prototype.draw.extend(
     'polygon',
     Object.assign({}, SVG.Element.prototype.draw.plugins.polygon, {
@@ -112,97 +151,140 @@ SVG.Element.prototype.draw.extend(
     }),
 );
 
-// Fix method drag
+/**
+ * 修复拖拽方法
+ * 修复SVG.Element.prototype.draggable方法，确保在拖拽过程中正确处理坐标转换
+ */
 const originalDraggable = SVG.Element.prototype.draggable;
 SVG.Element.prototype.draggable = function constructor(...args: any): any {
+    // 获取已存在的拖拽处理器
     let handler = this.remember('_draggable');
     if (!handler) {
+        // 如果不存在，调用原始draggable方法创建handler
         originalDraggable.call(this, ...args);
         handler = this.remember('_draggable');
+        // 重写drag方法，修复坐标转换问题
         handler.drag = function (e: any) {
+            // 获取屏幕坐标系到SVG坐标系的转换矩阵
             this.m = this.el.node.getScreenCTM().inverse();
+            // 调用原始drag方法
             return handler.constructor.prototype.drag.call(this, e);
         };
     } else {
+        // 如果handler已存在，直接调用原始draggable方法
         originalDraggable.call(this, ...args);
     }
 
     return this;
 };
+
+// 将原始draggable方法的所有属性复制到新的draggable方法上
 for (const key of Object.keys(originalDraggable)) {
     SVG.Element.prototype.draggable[key] = originalDraggable[key];
 }
 
-// Fix method resize
+/**
+ * 修复调整大小方法
+ * 修复SVG.Element.prototype.resize方法，添加对特殊键和形状类型的处理
+ * 支持立方体透视变换和矩形精确旋转
+ */
 const originalResize = SVG.Element.prototype.resize;
 SVG.Element.prototype.resize = function constructor(...args: any): any {
+    // 获取已存在的调整大小处理器
     let handler = this.remember('_resizeHandler');
     if (!handler) {
+        // 如果不存在，调用原始resize方法创建handler
         originalResize.call(this, ...args);
         handler = this.remember('_resizeHandler');
+        // 重写resize方法，添加特殊键和形状类型的处理
         handler.resize = function (e: any) {
+            // 从事件详情中获取原始事件对象
             const { event } = e.detail;
+            // 记录是否按下了旋转点
             this.rotationPointPressed = e.type === 'rot';
+            // 检查是否应该执行调整大小操作
             if (
-                event.button === 0 &&
-                // ignore shift key for cuboids (change perspective) and rectangles (precise rotation)
+                event.button === 0 && // 只响应左键点击
+                // 对于立方体（改变透视）和矩形（精确旋转），忽略shift键
                 (!event.shiftKey || (
-                    this.el.parent().hasClass('cvat_canvas_shape_cuboid')
-                    || this.el.type  === 'rect')
-                ) && !event.altKey
+                    this.el.parent().hasClass('cvat_canvas_shape_cuboid') // 立方体形状
+                    || this.el.type  === 'rect') // 矩形形状
+                ) && !event.altKey // 不响应alt键
             ) {
+                // 调用原始resize方法
                 return handler.constructor.prototype.resize.call(this, e);
             }
         };
+        // 重写update方法，修复坐标转换问题
         handler.update = function (e: any) {
+            // 如果没有按下旋转点，更新坐标转换矩阵
             if (!this.rotationPointPressed) {
                 this.m = this.el.node.getScreenCTM().inverse();
             }
+            // 调用原始update方法
             handler.constructor.prototype.update.call(this, e);
         };
     } else {
+        // 如果handler已存在，直接调用原始resize方法
         originalResize.call(this, ...args);
     }
 
     return this;
 };
+
+// 将原始resize方法的所有属性复制到新的resize方法上
 for (const key of Object.keys(originalResize)) {
     SVG.Element.prototype.resize[key] = originalResize[key];
 }
 
+/**
+ * 立方体边缘索引枚举
+ * 定义立方体的四个主要边缘：前左(FL)、前右(FR)、后右(DR)、后左(DL)
+ */
 enum EdgeIndex {
-    FL = 1,
-    FR = 2,
-    DR = 3,
-    DL = 4,
+    FL = 1, // 前左边缘 (Front Left)
+    FR = 2, // 前右边缘 (Front Right)
+    DR = 3, // 后右边缘 (Down Right)
+    DL = 4, // 后左边缘 (Down Left)
 }
 
+/**
+ * 根据立方体点的索引获取对应的边缘索引
+ * @param cuboidPoint 立方体点的索引（0-7）
+ * @returns 对应的边缘索引
+ */
 function getEdgeIndex(cuboidPoint: number): EdgeIndex {
     switch (cuboidPoint) {
         case 0:
         case 1:
-            return EdgeIndex.FL;
+            return EdgeIndex.FL; // 点0和1属于前左边缘
         case 2:
         case 3:
-            return EdgeIndex.FR;
+            return EdgeIndex.FR; // 点2和3属于前右边缘
         case 4:
         case 5:
-            return EdgeIndex.DR;
+            return EdgeIndex.DR; // 点4和5属于后右边缘
         default:
-            return EdgeIndex.DL;
+            return EdgeIndex.DL; // 点6和7属于后左边缘
     }
 }
 
+/**
+ * 根据边缘索引获取对应的立方体点索引
+ * 返回构成该边缘的两个点的索引
+ * @param edgeIndex 边缘索引
+ * @returns 构成该边缘的两个点的索引数组
+ */
 function getTopDown(edgeIndex: EdgeIndex): number[] {
     switch (edgeIndex) {
         case EdgeIndex.FL:
-            return [0, 1];
+            return [0, 1]; // 前左边缘由点0和1构成
         case EdgeIndex.FR:
-            return [2, 3];
+            return [2, 3]; // 前右边缘由点2和3构成
         case EdgeIndex.DR:
-            return [4, 5];
+            return [4, 5]; // 后右边缘由点4和5构成
         default:
-            return [6, 7];
+            return [6, 7]; // 后左边缘由点6和7构成
     }
 }
 
